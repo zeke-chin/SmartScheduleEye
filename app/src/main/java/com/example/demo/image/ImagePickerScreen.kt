@@ -7,8 +7,12 @@ import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.*
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -22,7 +26,6 @@ import coil.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.foundation.background
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
@@ -42,6 +45,8 @@ import android.widget.Toast
 import java.util.*
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.TextField
+import androidx.compose.foundation.clickable
 
 enum class ScheduleType {
     NORMAL_WORK,    // CT/DR/体检/DR+检
@@ -224,10 +229,15 @@ fun ImagePickerScreen(
                 
                 // 在这里显示表格（分隔栏下方）
                 if (scheduleTableState.isNotEmpty()) {
-                    ScheduleTable(scheduleTableState)
+                    ScheduleTable(
+                        markdownTable = scheduleTableState,
+                        onTableUpdated = { newTable ->
+                            scheduleTableState = newTable
+                        }
+                    )
                 }
                 
-                // ���钮区域
+                // 钮区域
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -333,7 +343,7 @@ fun ImagePickerScreen(
                                             }
                                         }
                                     } catch (e: Exception) {
-                                        dialogMessage = "图片解析失败～请重试\n多次重试失败联系🍓草莓园"
+                                        dialogMessage = "图片解析失败～请重试\n多次重试败联系🍓草莓园"
                                         showDialog = true
                                     } finally {
                                         isAnalyzing = false
@@ -416,8 +426,30 @@ fun ImagePickerScreenAnalyzingPreview() {
     )
 }
 
+// 添加日期处理工具函数
+private fun adjustDate(date: String, dayOffset: Int): String {
+    try {
+        val parts = date.split(".")
+        if (parts.size >= 3) {
+            val calendar = Calendar.getInstance().apply {
+                set(Calendar.YEAR, parts[0].toInt())
+                set(Calendar.MONTH, parts[1].toInt() - 1)  // Calendar月份从0开始
+                set(Calendar.DAY_OF_MONTH, parts[2].toInt())
+                add(Calendar.DAY_OF_MONTH, dayOffset)
+            }
+            return "${calendar.get(Calendar.YEAR)}.${calendar.get(Calendar.MONTH) + 1}.${calendar.get(Calendar.DAY_OF_MONTH)}"
+        }
+    } catch (e: Exception) {
+        Log.e("日期调整", "日期格式错误: $date", e)
+    }
+    return date
+}
+
 @Composable
-fun ScheduleTable(markdownTable: String) {
+fun ScheduleTable(
+    markdownTable: String,
+    onTableUpdated: (String) -> Unit = {}
+) {
     if (markdownTable.isNotEmpty()) {
         val lines = markdownTable.lines()
         if (lines.size >= 4) {
@@ -425,10 +457,10 @@ fun ScheduleTable(markdownTable: String) {
             val values = lines[2].trim('|').split('|').map { it.trim() }
             val emojis = lines[3].trim('|').split('|').map { it.trim() }
 
-            // 添加外限制框
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .height(IntrinsicSize.Min)
                     .padding(16.dp)
                     .background(
                         color = MaterialTheme.colorScheme.surface,
@@ -437,7 +469,6 @@ fun ScheduleTable(markdownTable: String) {
                     .clip(MaterialTheme.shapes.medium)
                     .padding(1.dp)
             ) {
-                // 添加水平滚动
                 Box(
                     modifier = Modifier
                         .horizontalScroll(rememberScrollState())
@@ -449,12 +480,13 @@ fun ScheduleTable(markdownTable: String) {
                     ) {
                         dates.forEachIndexed { index, date ->
                             Box(
-                                modifier = Modifier.padding(
-                                    start = if (index == 0) 0.dp else 4.dp,
-                                    end = if (index == dates.size - 1) 0.dp else 4.dp
-                                )
+                                modifier = Modifier
+                                    .height(IntrinsicSize.Min)
+                                    .padding(
+                                        start = if (index == 0) 0.dp else 4.dp,
+                                        end = if (index == dates.size - 1) 0.dp else 4.dp
+                                    )
                             ) {
-                                // 添加左边的分隔线
                                 if (index > 0) {
                                     Box(
                                         modifier = Modifier
@@ -471,7 +503,28 @@ fun ScheduleTable(markdownTable: String) {
                                     date = date,
                                     value = values.getOrNull(index) ?: "",
                                     emoji = emojis.getOrNull(index) ?: "",
-                                    modifier = Modifier.width(85.dp) // 固定每个单元格的宽度
+                                    modifier = Modifier.width(85.dp)
+                                        .height(IntrinsicSize.Min),
+                                    onDateChange = { newDate ->
+                                        // 更新所有日期
+                                        val updatedDates = dates.mapIndexed { i, oldDate ->
+                                            when {
+                                                i < index -> adjustDate(newDate, i - index) // 左边的日期
+                                                i > index -> adjustDate(newDate, i - index) // 右边的日期
+                                                else -> newDate // 当前修改的日期
+                                            }
+                                        }
+                                        
+                                        // 重新生成表格
+                                        val newTable = """
+                                            ${updatedDates.joinToString(" | ", "| ", " |")}
+                                            ${lines[1]}
+                                            ${values.joinToString(" | ", "| ", " |")}
+                                            ${emojis.joinToString(" | ", "| ", " |")}
+                                        """.trimIndent()
+                                        
+                                        onTableUpdated(newTable)
+                                    }
                                 )
                             }
                         }
@@ -487,22 +540,61 @@ private fun ScheduleCell(
     date: String,
     value: String,
     emoji: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onDateChange: (String) -> Unit = {}
 ) {
+    var isEditing by remember { mutableStateOf(false) }
+    var editedDate by remember { mutableStateOf(date) }
+    
     Column(
         modifier = modifier
             .background(
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 shape = MaterialTheme.shapes.small
             )
-            .padding(8.dp),
+            .padding(8.dp)
+            .clickable { isEditing = true },  // 添加点击事件
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        if (isEditing) {
+            AlertDialog(
+                onDismissRequest = { isEditing = false },
+                title = { Text("修改日期") },
+                text = {
+                    // 这里可以添加日期选择器，这里用简单的文本输入示例
+                    TextField(
+                        value = editedDate,
+                        onValueChange = { editedDate = it },
+                        label = { Text("日期 (格式: YYYY.MM.DD)") }
+                    )
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        onDateChange(editedDate)
+                        isEditing = false
+                    }) {
+                        Text("确定")
+                    }
+                },
+                dismissButton = {
+                    Button(onClick = { isEditing = false }) {
+                        Text("取消")
+                    }
+                }
+            )
+        }
+        
         Text(
-            text = date.split(".").takeLast(2).joinToString("."),
+            text = date.split(".").let { parts ->
+                if (parts.size >= 3) {
+                    "${parts[1]}.${parts[2]}"
+                } else {
+                    date
+                }
+            },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1 // 限制为单行
+            maxLines = 1
         )
         Box(
             modifier = Modifier
@@ -605,7 +697,12 @@ fun ImagePickerScreenWithTablePreview() {
             
             // 显示表格
             if (scheduleTableState.isNotEmpty()) {
-                ScheduleTable(scheduleTableState)
+                ScheduleTable(
+                    markdownTable = scheduleTableState,
+                    onTableUpdated = { newTable ->
+                        scheduleTableState = newTable
+                    }
+                )
             }
             
             // 按钮区域
