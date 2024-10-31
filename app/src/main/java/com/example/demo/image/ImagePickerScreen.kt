@@ -40,6 +40,8 @@ import android.util.Log
 import androidx.compose.material3.AlertDialog
 import android.widget.Toast
 import java.util.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 
 enum class ScheduleType {
     NORMAL_WORK,    // CT/DR/体检/DR+检
@@ -225,7 +227,7 @@ fun ImagePickerScreen(
                     ScheduleTable(scheduleTableState)
                 }
                 
-                // 按钮区域
+                // ���钮区域
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -423,43 +425,55 @@ fun ScheduleTable(markdownTable: String) {
             val values = lines[2].trim('|').split('|').map { it.trim() }
             val emojis = lines[3].trim('|').split('|').map { it.trim() }
 
-            Column(
+            // 添加外限制框
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .padding(16.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = MaterialTheme.shapes.medium
+                    )
+                    .clip(MaterialTheme.shapes.medium)
+                    .padding(1.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                // 添加水平滚动
+                Box(
+                    modifier = Modifier
+                        .horizontalScroll(rememberScrollState())
+                        .padding(8.dp)
                 ) {
-                    dates.forEachIndexed { index, date ->
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(
+                    Row(
+                        modifier = Modifier.width(IntrinsicSize.Max),
+                        horizontalArrangement = Arrangement.Start
+                    ) {
+                        dates.forEachIndexed { index, date ->
+                            Box(
+                                modifier = Modifier.padding(
                                     start = if (index == 0) 0.dp else 4.dp,
                                     end = if (index == dates.size - 1) 0.dp else 4.dp
                                 )
-                        ) {
-                            // 添加左边的分隔线
-                            if (index > 0) {
-                                Box(
-                                    modifier = Modifier
-                                        .width(1.dp)
-                                        .fillMaxHeight()
-                                        .background(
-                                            MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-                                        )
-                                        .align(Alignment.CenterStart)
+                            ) {
+                                // 添加左边的分隔线
+                                if (index > 0) {
+                                    Box(
+                                        modifier = Modifier
+                                            .width(1.dp)
+                                            .fillMaxHeight()
+                                            .background(
+                                                MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                                            )
+                                            .align(Alignment.CenterStart)
+                                    )
+                                }
+                                
+                                ScheduleCell(
+                                    date = date,
+                                    value = values.getOrNull(index) ?: "",
+                                    emoji = emojis.getOrNull(index) ?: "",
+                                    modifier = Modifier.width(85.dp) // 固定每个单元格的宽度
                                 )
                             }
-                            
-                            ScheduleCell(
-                                date = date,
-                                value = values.getOrNull(index) ?: "",
-                                emoji = emojis.getOrNull(index) ?: "",
-                                modifier = Modifier.fillMaxWidth()
-                            )
                         }
                     }
                 }
@@ -484,13 +498,12 @@ private fun ScheduleCell(
             .padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // 上方日期文本
         Text(
             text = date.split(".").takeLast(2).joinToString("."),
-            style = MaterialTheme.typography.labelSmall,  // 小号文本
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1 // 限制为单行
         )
-        // 上分隔线
         Box(
             modifier = Modifier
                 .padding(vertical = 4.dp)
@@ -500,30 +513,13 @@ private fun ScheduleCell(
                     MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
                 )
         )
-        // 中间排班值文本 - 这里控制字体大小
         Text(
             text = value,
-            // 可以使用以下任意一种预设值来调整大小:
-            // typography.displayLarge  - 最大
-            // typography.displayMedium - 较大
-            // typography.displaySmall  - 大
-            // typography.headlineLarge - 较大标题
-            // typography.headlineMedium - 中等标题
-            // typography.headlineSmall - 小标题
-            // typography.titleLarge    - 大标题
-            // typography.titleMedium   - 中标题
-            // typography.titleSmall    - 小标题
-            // typography.bodyLarge     - 大正文
-            // typography.bodyMedium    - 中正文（当前使用）
-            // typography.bodySmall     - 小正文
-            // typography.labelLarge    - 大标签
-            // typography.labelMedium   - 中标签
-            // typography.labelSmall    - 小标签
-            style = MaterialTheme.typography.bodySmall,  // 修改这里可以改变字体大小
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(vertical = 0.2.dp)
+            modifier = Modifier.padding(vertical = 0.2.dp),
+            maxLines = 1 // 限制为单行
         )
-        // 下分隔线
         Box(
             modifier = Modifier
                 .padding(vertical = 4.dp)
@@ -533,11 +529,11 @@ private fun ScheduleCell(
                     MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
                 )
         )
-        // 下方表情文本
         Text(
             text = emoji,
-            style = MaterialTheme.typography.labelSmall,  // 小号文本
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1 // 限制为单行
         )
     }
 }
