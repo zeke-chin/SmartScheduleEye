@@ -85,4 +85,8 @@ dependencies {
     implementation("com.aallam.openai:openai-client:3.8.2")
     // OpenAI SDK 依赖 Ktor，需要添加以下依赖
     implementation("io.ktor:ktor-client-android:2.3.7")
+
+    // Material Icons 依赖
+    implementation "androidx.compose.material:material-icons-core:1.5.4"
+    implementation "androidx.compose.material:material-icons-extended:1.5.4"
 }

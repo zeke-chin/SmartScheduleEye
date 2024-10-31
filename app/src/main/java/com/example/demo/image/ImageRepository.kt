@@ -16,21 +16,16 @@ import com.aallam.openai.api.http.Timeout
 import android.content.Context
 import android.util.Log
 import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class ImageRepository(
-    private val context: Context
+    private val context: Context,
+    private val host: String,
+    private val apiKey: String,
+    private val modelId: String
 ) {
 
-    private val host = "https://open.bigmodel.cn/api/paas/v4/"
-    private val apiKey = "d8cf7e81dc97fd21e176b783b4704101.fcmydfO7fCiSKzyN"
-
-    private val openAI = OpenAI(
-        token = apiKey,
-        timeout = Timeout(socket = 90.seconds),
-        host = OpenAIHost(baseUrl = host)
-
-    )
-    private val modelId = "glm-4v"
     private val prompt = """
 读取图片
 在回答问题之前,请先执行以下步骤:
@@ -46,6 +41,14 @@ class ImageRepository(
 """
 
     private lateinit var messages: MutableList<ChatMessage>
+
+    private val openAI by lazy {
+        OpenAI(
+            token = apiKey,
+            timeout = Timeout(socket = 90.seconds),
+            host = OpenAIHost(baseUrl = host)
+        )
+    }
 
     @OptIn(BetaOpenAI::class)
     suspend fun analyzeImage(imageBase64: String): Result<String> {
@@ -66,7 +69,10 @@ class ImageRepository(
                 messages = messages,
             )
 
-            val completion: ChatCompletion = openAI.chatCompletion(chatCompletionRequest)
+            val completion: ChatCompletion = withContext(Dispatchers.IO) {
+                openAI.chatCompletion(chatCompletionRequest)
+            }
+            
             val content = completion.choices.first().message.content
 
             if (content.isNullOrEmpty()) {
@@ -81,8 +87,14 @@ class ImageRepository(
         }
     }
 
-    fun cleanup() {
-        openAI.close()
+    suspend fun cleanup() {
+        withContext(Dispatchers.IO) {
+            try {
+                openAI.close()
+            } catch (e: Exception) {
+                Log.e("ImageRepository", "Error closing OpenAI client: ${e.message}")
+            }
+        }
     }
 
 
@@ -158,13 +170,13 @@ class ImageRepository(
 ```json
 {
   "钱淑阳": {
-    "9-2": "出",
-    "9-3": "休",
-    "9-4": "CT*",
-    "9-5": "DR+检",
-    "9-6": "休",
-    "9-7": "(值)",
-    "9-8": "出"
+    "10-28": "DR+检",
+    "10-29": "CT*",
+    "10-30": "休",
+    "10-31": "CT",
+    "11-1": "(值)",
+    "11-2": "出",
+    "11-3": ""
   }
 }
 ```

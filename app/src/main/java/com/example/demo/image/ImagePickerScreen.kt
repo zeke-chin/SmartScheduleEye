@@ -47,6 +47,29 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.TextField
 import androidx.compose.foundation.clickable
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.ui.draw.shadow
+import androidx.compose.material.icons.filled.Check
+import android.content.Context
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.OutlinedTextField
+import com.example.demo.utils.LogManager
+import com.example.demo.MainActivity
 
 enum class ScheduleType {
     NORMAL_WORK,    // CT/DR/体检/DR+检
@@ -55,6 +78,17 @@ enum class ScheduleType {
     NIGHT_SHIFT,    // (值)
     MORNING_END,    // 出
     UNKNOWN;        // 未知类型
+
+    fun getAlarmTime(): List<String> {
+        return when (this) {
+            NORMAL_WORK -> listOf("06:40", "12:59")
+            SHORT_WORK -> listOf("06:40", "12:59")
+            NIGHT_SHIFT -> listOf("14:30")
+            MORNING_END -> listOf("07:10")
+            REST -> listOf("休息")
+            UNKNOWN -> listOf("未知")
+        }
+    }
 
     companion object {
         fun fromScheduleText(text: String): ScheduleType {
@@ -80,7 +114,26 @@ fun ImagePickerScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val imageRepository = remember { ImageRepository(context) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    
+    // 从 SharedPreferences 读取配置
+    val prefs = remember { context.getSharedPreferences("app_config", Context.MODE_PRIVATE) }
+    var apiHost by remember { 
+        mutableStateOf(prefs.getString("api_host", "https://open.bigmodel.cn/api/paas/v4/") ?: "https://open.bigmodel.cn/api/paas/v4/")
+    }
+    var apiKey by remember { 
+        mutableStateOf(prefs.getString("api_key", "d8cf7e81dc97fd21e176b783b4704101.fcmydfO7fCiSKzyN") ?: "d8cf7e81dc97fd21e176b783b4704101.fcmydfO7fCiSKzyN")
+    }
+    
+    // 添加 modelId 的状态
+    var modelId by remember { 
+        mutableStateOf(prefs.getString("model_id", "glm-4v") ?: "glm-4v")
+    }
+    
+    // 修改 ImageRepository 实例化
+    var imageRepository by remember { 
+        mutableStateOf(ImageRepository(context, apiHost, apiKey, modelId))
+    }
     
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var isAnalyzing by remember { mutableStateOf(false) }
@@ -107,9 +160,18 @@ fun ImagePickerScreen(
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        selectedImageUri = uri
-        scale = 1f
-        offset = Offset.Zero
+        try {
+            selectedImageUri = uri
+            scale = 1f
+            offset = Offset.Zero
+        } catch (e: Exception) {
+            Log.e("ImagePicker", "Error selecting image: ${e.message}")
+            Toast.makeText(
+                context,
+                "选择图片失败，请重试",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
     }
 
     Box(
@@ -122,7 +184,18 @@ fun ImagePickerScreen(
     ) {
         if (selectedImageUri == null) {
             Button(
-                onClick = { launcher.launch("image/*") },
+                onClick = { 
+                    try {
+                        launcher.launch("image/*")
+                    } catch (e: Exception) {
+                        Log.e("ImagePicker", "Error launching picker: ${e.message}")
+                        Toast.makeText(
+                            context,
+                            "启动图片选择器失败，请重试",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                },
                 modifier = Modifier
                     .height(56.dp)
                     .width(200.dp)
@@ -227,7 +300,7 @@ fun ImagePickerScreen(
                     )
                 }
                 
-                // 在这里显示表格（分隔栏下方）
+                // 在这里显示表格（分隔方）
                 if (scheduleTableState.isNotEmpty()) {
                     ScheduleTable(
                         markdownTable = scheduleTableState,
@@ -305,7 +378,7 @@ fun ImagePickerScreen(
                                                                 val tableValues = scheduleData.joinToString(" | ", "| ", " |") { it.second }
                                                                 val tableEmojis = scheduleData.joinToString(" | ", "| ", " |") { 
                                                                     when (it.third) {
-                                                                        ScheduleType.NIGHT_SHIFT -> "值夜班🌙"
+                                                                        ScheduleType.NIGHT_SHIFT -> "值夜班了🌙"
                                                                         ScheduleType.MORNING_END -> "早班结束🌞"
                                                                         ScheduleType.REST -> "睡大觉喽😴"
                                                                         ScheduleType.NORMAL_WORK -> "正常上班😊"
@@ -323,7 +396,7 @@ fun ImagePickerScreen(
                                                                 
                                                                 onAnalysisResult("解析成功！请查看排班表")
                                                             } else {
-                                                                dialogMessage = "未找到排班信息"
+                                                                dialogMessage = "未找到排班信"
                                                                 showDialog = true
                                                             }
                                                         } catch (e: Exception) {
@@ -357,6 +430,44 @@ fun ImagePickerScreen(
                         ) {
                             Text(if (isAnalyzing) "分析中..." else "分析图片")
                         }
+
+                        // 添加设置闹钟按钮
+                        if (scheduleTableState.isNotEmpty()) {
+                            Button(
+                                onClick = {
+                                    val lines = scheduleTableState.lines()
+                                    if (lines.size >= 4) {
+                                        val dates = lines[0].trim('|').split('|').map { it.trim() }
+                                        val values = lines[2].trim('|').split('|').map { it.trim() }
+                                        val emojis = lines[3].trim('|').split('|').map { it.trim() }
+                                        
+                                        val alarmList = mutableListOf<Triple<String, String, String>>()
+                                        
+                                        dates.forEachIndexed { index, date ->
+                                            val value = values.getOrNull(index) ?: ""
+                                            val emoji = emojis.getOrNull(index) ?: ""
+                                            val scheduleType = ScheduleType.fromScheduleText(value)
+                                            val alarmTimes = scheduleType.getAlarmTime()
+                                            
+                                            // 如果有闹钟时间，则添加到列表
+                                            if (alarmTimes.isNotEmpty() && alarmTimes[0] != "休息" && alarmTimes[0] != "未知") {
+                                                alarmTimes.forEach { time ->
+                                                    alarmList.add(Triple(date, time, emoji))
+                                                }
+                                            }
+                                        }
+                                        
+                                        // 调用新的设置闹钟方法
+                                        (context as? MainActivity)?.setAlarms(alarmList)
+                                    }
+                                },
+                                modifier = Modifier
+                                    .height(56.dp)
+                                    .width(200.dp)
+                            ) {
+                                Text("确认闹钟")
+                            }
+                        }
                     }
                 }
             }
@@ -370,6 +481,151 @@ fun ImagePickerScreen(
                 confirmButton = {
                     Button(onClick = { showDialog = false }) {
                         Text("确定")
+                    }
+                }
+            )
+        }
+
+        // 添加设置按钮
+        FloatingActionButton(
+            onClick = { showSettingsDialog = true },
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(16.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Settings,
+                contentDescription = "设置",
+                tint = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+        }
+        
+        // 设置对话框
+        if (showSettingsDialog) {
+            AlertDialog(
+                onDismissRequest = { showSettingsDialog = false },
+                title = { 
+                    Text(
+                        "API 配置",
+                        style = MaterialTheme.typography.headlineSmall
+                    )
+                },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = apiHost,
+                            onValueChange = { apiHost = it },
+                            label = { Text("API Host") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        
+                        OutlinedTextField(
+                            value = apiKey,
+                            onValueChange = { apiKey = it },
+                            label = { Text("API Key") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        
+                        OutlinedTextField(
+                            value = modelId,
+                            onValueChange = { modelId = it },
+                            label = { Text("Model ID") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            // 恢复默认按钮
+                            TextButton(
+                                onClick = {
+                                    apiHost = "https://open.bigmodel.cn/api/paas/v4/"
+                                    apiKey = "d8cf7e81dc97fd21e176b783b4704101.fcmydfO7fCiSKzyN"
+                                    modelId = "glm-4v"
+                                }
+                            ) {
+                                Text(
+                                    "恢复默认设置",
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            
+                            // 日志操作按钮
+                            Column(
+                                horizontalAlignment = Alignment.End
+                            ) {
+                                TextButton(
+                                    onClick = {
+                                        scope.launch {
+                                            LogManager.exportLogs(context).fold(
+                                                onSuccess = { file ->
+                                                    Toast.makeText(
+                                                        context,
+                                                        "日志已保存到: ${file.path}",
+                                                        Toast.LENGTH_LONG
+                                                    ).show()
+                                                },
+                                                onFailure = { e ->
+                                                    Toast.makeText(
+                                                        context,
+                                                        "导出日志失败: ${e.message}",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }
+                                            )
+                                        }
+                                    }
+                                ) {
+                                    Text(
+                                        "下载运行日志",
+                                        color = MaterialTheme.colorScheme.secondary
+                                    )
+                                }
+                                
+                                TextButton(
+                                    onClick = {
+                                        LogManager.openLogFolder(context)
+                                    }
+                                ) {
+                                    Text(
+                                        "打开日志文件夹",
+                                        color = MaterialTheme.colorScheme.secondary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        TextButton(onClick = { showSettingsDialog = false }) {
+                            Text("取消")
+                        }
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    imageRepository.cleanup()
+                                    prefs.edit().apply {
+                                        putString("api_host", apiHost)
+                                        putString("api_key", apiKey)
+                                        putString("model_id", modelId)
+                                        apply()
+                                    }
+                                    imageRepository = ImageRepository(context, apiHost, apiKey, modelId)
+                                    showSettingsDialog = false
+                                }
+                            }
+                        ) {
+                            Text("保存")
+                        }
                     }
                 }
             )
@@ -426,7 +682,7 @@ fun ImagePickerScreenAnalyzingPreview() {
     )
 }
 
-// 添加日期处理工具函数
+// 添加日期处理具函数
 private fun adjustDate(date: String, dayOffset: Int): String {
     try {
         val parts = date.split(".")
@@ -448,13 +704,13 @@ private fun adjustDate(date: String, dayOffset: Int): String {
 @Composable
 fun ScheduleTable(
     markdownTable: String,
-    onTableUpdated: (String) -> Unit = {}
+    onTableUpdated: (String) -> Unit
 ) {
     if (markdownTable.isNotEmpty()) {
         val lines = markdownTable.lines()
         if (lines.size >= 4) {
-            val dates = lines[0].trim('|').split('|').map { it.trim() }
-            val values = lines[2].trim('|').split('|').map { it.trim() }
+            val dates = lines[0].trim('|').split('|').map { it.trim() }.toMutableList()
+            val values = lines[2].trim('|').split('|').map { it.trim() }.toMutableList()
             val emojis = lines[3].trim('|').split('|').map { it.trim() }
 
             Box(
@@ -475,57 +731,65 @@ fun ScheduleTable(
                         .padding(8.dp)
                 ) {
                     Row(
-                        modifier = Modifier.width(IntrinsicSize.Max),
+                        modifier = Modifier
+                            .width(IntrinsicSize.Max)
+                            .height(IntrinsicSize.Max),
                         horizontalArrangement = Arrangement.Start
                     ) {
                         dates.forEachIndexed { index, date ->
                             Box(
                                 modifier = Modifier
-                                    .height(IntrinsicSize.Min)
+                                    .fillMaxHeight()
                                     .padding(
                                         start = if (index == 0) 0.dp else 4.dp,
-                                        end = if (index == dates.size - 1) 0.dp else 4.dp
+                                        end = if (index == dates.lastIndex) 0.dp else 4.dp
                                     )
                             ) {
-                                if (index > 0) {
-                                    Box(
-                                        modifier = Modifier
-                                            .width(1.dp)
-                                            .fillMaxHeight()
-                                            .background(
-                                                MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-                                            )
-                                            .align(Alignment.CenterStart)
-                                    )
-                                }
-                                
                                 ScheduleCell(
                                     date = date,
                                     value = values.getOrNull(index) ?: "",
                                     emoji = emojis.getOrNull(index) ?: "",
-                                    modifier = Modifier.width(85.dp)
-                                        .height(IntrinsicSize.Min),
+                                    modifier = Modifier
+                                        .width(85.dp)
+                                        .fillMaxHeight(),
                                     onDateChange = { newDate ->
-                                        // 更新所有日期
-                                        val updatedDates = dates.mapIndexed { i, oldDate ->
-                                            when {
-                                                i < index -> adjustDate(newDate, i - index) // 左边的日期
-                                                i > index -> adjustDate(newDate, i - index) // 右边的日期
-                                                else -> newDate // 当前修改的日期
-                                            }
+                                        dates[index] = newDate
+                                        
+                                        if (index >= 1) {
+                                            dates[index - 1] = adjustDate(newDate, -1)
+                                        }
+                                        if (index >= 2) {
+                                            dates[index - 2] = adjustDate(newDate, -2)
                                         }
                                         
-                                        // 重新生成表格
-                                        val newTable = """
-                                            ${updatedDates.joinToString(" | ", "| ", " |")}
-                                            ${lines[1]}
-                                            ${values.joinToString(" | ", "| ", " |")}
-                                            ${emojis.joinToString(" | ", "| ", " |")}
-                                        """.trimIndent()
+                                        if (index < dates.size - 1) {
+                                            dates[index + 1] = adjustDate(newDate, 1)
+                                        }
+                                        if (index < dates.size - 2) {
+                                            dates[index + 2] = adjustDate(newDate, 2)
+                                        }
                                         
+                                        val newTable = buildMarkdownTable(dates, values)
+                                        onTableUpdated(newTable)
+                                    },
+                                    onValueChange = { newValue ->
+                                        values[index] = newValue
+                                        val newTable = buildMarkdownTable(dates, values)
                                         onTableUpdated(newTable)
                                     }
                                 )
+                                
+                                if (index < dates.lastIndex) {
+                                    Box(
+                                        modifier = Modifier
+                                            .width(0.dp)
+                                            .fillMaxHeight()
+                                            .background(
+                                                MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                                            )
+                                            .align(Alignment.CenterEnd)
+                                    )
+                                }
                             }
                         }
                     }
@@ -541,61 +805,63 @@ private fun ScheduleCell(
     value: String,
     emoji: String,
     modifier: Modifier = Modifier,
-    onDateChange: (String) -> Unit = {}
+    onDateChange: (String) -> Unit = {},
+    onValueChange: (String) -> Unit = {}
 ) {
     var isEditing by remember { mutableStateOf(false) }
+    var isEditingValue by remember { mutableStateOf(false) }
     var editedDate by remember { mutableStateOf(date) }
+    var editedValue by remember { mutableStateOf(value) }
+    
+    // 解析日期字符串为 Calendar
+    val calendar = remember(date) {
+        Calendar.getInstance().apply {
+            date.split(".").let {
+                if (it.size == 3) {
+                    set(Calendar.YEAR, it[0].toInt())
+                    set(Calendar.MONTH, it[1].toInt() - 1)
+                    set(Calendar.DAY_OF_MONTH, it[2].toInt())
+                }
+            }
+        }
+    }
+    
+    var selectedYear by remember { mutableStateOf(calendar.get(Calendar.YEAR)) }
+    var selectedMonth by remember { mutableStateOf(calendar.get(Calendar.MONTH)) }
+    var selectedDay by remember { mutableStateOf(calendar.get(Calendar.DAY_OF_MONTH)) }
+    
+    LaunchedEffect(date) {
+        editedDate = date
+        date.split(".").let {
+            if (it.size == 3) {
+                selectedYear = it[0].toInt()
+                selectedMonth = it[1].toInt() - 1
+                selectedDay = it[2].toInt()
+            }
+        }
+    }
     
     Column(
         modifier = modifier
             .background(
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = MaterialTheme.shapes.small
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                shape = MaterialTheme.shapes.medium
             )
-            .padding(8.dp)
-            .clickable { isEditing = true },  // 添加点击事件
+            .padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        if (isEditing) {
-            AlertDialog(
-                onDismissRequest = { isEditing = false },
-                title = { Text("修改日期") },
-                text = {
-                    // 这里可以添加日期选择器，这里用简单的文本输入示例
-                    TextField(
-                        value = editedDate,
-                        onValueChange = { editedDate = it },
-                        label = { Text("日期 (格式: YYYY.MM.DD)") }
-                    )
-                },
-                confirmButton = {
-                    Button(onClick = {
-                        onDateChange(editedDate)
-                        isEditing = false
-                    }) {
-                        Text("确定")
-                    }
-                },
-                dismissButton = {
-                    Button(onClick = { isEditing = false }) {
-                        Text("取消")
-                    }
-                }
-            )
-        }
-        
+        // 日期显示
         Text(
-            text = date.split(".").let { parts ->
-                if (parts.size >= 3) {
-                    "${parts[1]}.${parts[2]}"
-                } else {
-                    date
-                }
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1
+            text = date.split(".").drop(1).joinToString("."),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .clip(MaterialTheme.shapes.small)
+                .clickable { isEditing = true }
+                .padding(vertical = 4.dp, horizontal = 8.dp)
         )
+        
+        // 分隔线
         Box(
             modifier = Modifier
                 .padding(vertical = 4.dp)
@@ -605,13 +871,19 @@ private fun ScheduleCell(
                     MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
                 )
         )
+        
+        // 班次显示
         Text(
             text = value,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(vertical = 0.2.dp),
-            maxLines = 1 // 限制为单行
+            modifier = Modifier
+                .clip(MaterialTheme.shapes.small)
+                .clickable { isEditingValue = true }
+                .padding(vertical = 4.dp, horizontal = 8.dp),
+            maxLines = 1
         )
+        
         Box(
             modifier = Modifier
                 .padding(vertical = 4.dp)
@@ -621,17 +893,343 @@ private fun ScheduleCell(
                     MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
                 )
         )
+        
+        // Emoji 显示
+        val scheduleType = ScheduleType.fromScheduleText(value)
+        val (currentEmoji, emojiColor) = when (scheduleType) {
+            ScheduleType.NIGHT_SHIFT -> "值夜班了🌙" to MaterialTheme.colorScheme.tertiary
+            ScheduleType.MORNING_END -> "早班结束🌞" to MaterialTheme.colorScheme.primary
+            ScheduleType.REST -> "睡大觉喽😴" to MaterialTheme.colorScheme.secondary
+            ScheduleType.NORMAL_WORK -> "正常上班😊" to MaterialTheme.colorScheme.primary
+            ScheduleType.SHORT_WORK -> "没有午休😭" to MaterialTheme.colorScheme.error
+            ScheduleType.UNKNOWN -> "未知班次❓" to MaterialTheme.colorScheme.outline
+        }
         Text(
-            text = emoji,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1 // 限制为单行
+            text = currentEmoji,
+            style = MaterialTheme.typography.labelMedium,
+            color = emojiColor,
+            maxLines = 1,
+            modifier = Modifier.padding(vertical = 2.dp)
+        )
+        
+        // 闹钟时间显示
+        Box(
+            modifier = Modifier
+                .padding(vertical = 4.dp)
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(
+                    MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                )
+        )
+        
+        // 闹钟图标
+        Text(
+            text = "⏰",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(vertical = 2.dp)
+        )
+        
+        // 闹钟时间列表
+        val alarmTimes = ScheduleType.fromScheduleText(value).getAlarmTime()
+        alarmTimes.forEach { time ->
+            Text(
+                text = time,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(vertical = 1.dp)
+            )
+        }
+    }
+
+    if (isEditing) {
+        AlertDialog(
+            onDismissRequest = { isEditing = false },
+            title = { 
+                Text(
+                    "修改日期",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.padding(top = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // 年份选择
+                    DatePickerRow(
+                        label = "年份：",
+                        value = selectedYear,
+                        onValueChange = { selectedYear = it },
+                        range = selectedYear - 1..selectedYear + 1
+                    )
+                    
+                    // 月份选择
+                    DatePickerRow(
+                        label = "月份：",
+                        value = selectedMonth + 1,
+                        onValueChange = { selectedMonth = it - 1 },
+                        range = 1..12
+                    )
+                    
+                    // 日期选择
+                    val maxDays = Calendar.getInstance().apply {
+                        set(selectedYear, selectedMonth, 1)
+                    }.getActualMaximum(Calendar.DAY_OF_MONTH)
+                    
+                    DatePickerRow(
+                        label = "日期：",
+                        value = selectedDay,
+                        onValueChange = { selectedDay = it },
+                        range = 1..maxDays
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val newDate = String.format("%d.%d.%d", selectedYear, selectedMonth + 1, selectedDay)
+                        onDateChange(newDate)
+                        isEditing = false
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Text("确定")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { isEditing = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    if (isEditingValue) {
+        AlertDialog(
+            onDismissRequest = { isEditingValue = false },
+            title = { 
+                Text(
+                    "修改班次",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // 班次选项
+                    ScheduleTypeOption(
+                        title = "正常班次",
+                        description = "CT/DR/体检/DR+检",
+                        currentValue = editedValue,
+                        onClick = { 
+                            editedValue = "CT"  // 默认选择CT
+                            onValueChange(editedValue)
+                            isEditingValue = false
+                        }
+                    )
+                    
+                    ScheduleTypeOption(
+                        title = "无午休班",
+                        description = "日/*",
+                        currentValue = editedValue,
+                        onClick = { 
+                            editedValue = "CT*"  // 添加*号表示短班
+                            onValueChange(editedValue)
+                            isEditingValue = false
+                        }
+                    )
+                    
+                    ScheduleTypeOption(
+                        title = "休息",
+                        description = "公休/休",
+                        currentValue = editedValue,
+                        onClick = { 
+                            editedValue = "休"
+                            onValueChange(editedValue)
+                            isEditingValue = false
+                        }
+                    )
+                    
+                    ScheduleTypeOption(
+                        title = "夜班",
+                        description = "值",
+                        currentValue = editedValue,
+                        onClick = { 
+                            editedValue = "(值)"
+                            onValueChange(editedValue)
+                            isEditingValue = false
+                        }
+                    )
+                    
+                    ScheduleTypeOption(
+                        title = "出夜班",
+                        description = "出",
+                        currentValue = editedValue,
+                        onClick = { 
+                            editedValue = "出"
+                            onValueChange(editedValue)
+                            isEditingValue = false
+                        }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { isEditingValue = false }) {
+                    Text("取消")
+                }
+            }
         )
     }
 }
 
+@Composable
+private fun ScheduleTypeOption(
+    title: String,
+    description: String,
+    currentValue: String,
+    onClick: () -> Unit
+) {
+    val scheduleType = ScheduleType.fromScheduleText(currentValue)
+    val isSelected = when (title) {
+        "正常班次" -> scheduleType == ScheduleType.NORMAL_WORK
+        "短班" -> scheduleType == ScheduleType.SHORT_WORK
+        "休息" -> scheduleType == ScheduleType.REST
+        "夜班" -> scheduleType == ScheduleType.NIGHT_SHIFT
+        "早班结束" -> scheduleType == ScheduleType.MORNING_END
+        else -> false
+    }
+    
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .background(
+                if (isSelected) 
+                    MaterialTheme.colorScheme.primaryContainer 
+                else 
+                    MaterialTheme.colorScheme.surface
+            )
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = if (isSelected) 
+                    MaterialTheme.colorScheme.onPrimaryContainer 
+                else 
+                    MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isSelected) 
+                    MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f) 
+                else 
+                    MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (isSelected) {
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = "已选择",
+                tint = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+}
+
+@Composable
+private fun DatePickerRow(
+    label: String,
+    value: Int,
+    onValueChange: (Int) -> Unit,
+    range: IntRange
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            IconButton(
+                onClick = { 
+                    if (value > range.first) onValueChange(value - 1)
+                },
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Remove,
+                    contentDescription = "减少",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+            Text(
+                text = value.toString(),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            IconButton(
+                onClick = { 
+                    if (value < range.last) onValueChange(value + 1)
+                },
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Add,
+                    contentDescription = "增加",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+    }
+}
+
+// 添加辅助函数来生成 markdown 表格
+private fun buildMarkdownTable(dates: List<String>, values: List<String>): String {
+    val tableHeader = dates.joinToString(" | ", "| ", " |")
+    val tableDivider = dates.joinToString(" | ", "| ", " |") { ":---:" }
+    val tableValues = values.joinToString(" | ", "| ", " |")
+    val tableEmojis = values.joinToString(" | ", "| ", " |") { value ->
+        when (ScheduleType.fromScheduleText(value)) {
+            ScheduleType.NIGHT_SHIFT -> "值夜班了🌙"
+            ScheduleType.MORNING_END -> "早班结束🌞"
+            ScheduleType.REST -> "睡大觉喽😴"
+            ScheduleType.NORMAL_WORK -> "正常上班😊"
+            ScheduleType.SHORT_WORK -> "没有午休😭"
+            ScheduleType.UNKNOWN -> "未知班次❓"
+        }
+    }
+    
+    return """
+        $tableHeader
+        $tableDivider
+        $tableValues
+        $tableEmojis
+    """.trimIndent()
+}
+
 @Preview(
-    name = "显示表格后预览",
+    name = "显示表格后预",
     showBackground = true,
     showSystemUi = true
 )
@@ -642,7 +1240,7 @@ fun ImagePickerScreenWithTablePreview() {
         2024.9.23 | 2024.9.24 | 2024.9.25 | 2024.9.26 | 2024.9.27 | 2024.9.28 | 2024.9.29
         :---: | :---: | :---: | :---: | :---: | :---: | :---:
         (值) | 出 | 休 | CT | DR+检* | 公 | 休
-        值夜班🌙 | 早班结束🌞 | 睡大觉喽😴 | 正常上班😊 | 没有午休😭 | 睡大觉喽😴 | 睡大觉喽😴
+        值夜班了🌙 | 早班结束🌞 | 睡大觉喽😴 | 正常上班😊 | 没有午休😭 | 睡大觉喽😴 | 睡大觉喽😴
         """.trimIndent()
     )}
     
