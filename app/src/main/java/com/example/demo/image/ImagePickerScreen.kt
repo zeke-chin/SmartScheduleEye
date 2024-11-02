@@ -119,10 +119,10 @@ fun ImagePickerScreen(
     // 从 SharedPreferences 读取配置
     val prefs = remember { context.getSharedPreferences("app_config", Context.MODE_PRIVATE) }
     var apiHost by remember { 
-        mutableStateOf(prefs.getString("api_host", "https://open.bigmodel.cn/api/paas/v4/") ?: "https://open.bigmodel.cn/api/paas/v4/")
+        mutableStateOf(prefs.getString("api_host", "API_HOST") ?: "https://open.bigmodel.cn/api/paas/v4/")
     }
     var apiKey by remember { 
-        mutableStateOf(prefs.getString("api_key", "d8cf7e81dc97fd21e176b783b4704101.fcmydfO7fCiSKzyN") ?: "d8cf7e81dc97fd21e176b783b4704101.fcmydfO7fCiSKzyN")
+        mutableStateOf(prefs.getString("api_key", "API_KEY") ?: "d8cf7e81dc97fd21e176b783b4704101.fcmydfO7fCiSKzyN")
     }
     
     // 添加 modelId 的状态
